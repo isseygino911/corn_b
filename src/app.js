@@ -3,7 +3,9 @@ import { errorHandler } from './middleware/errorHandler.js';
 import { createAccountRouter } from './routes/account.js';
 import { createAdminRouter } from './routes/admin.js';
 import { createAuthRouter } from './routes/auth.js';
+import { createCheckoutRouter } from './routes/checkout.js';
 import { createGeoRouter } from './routes/geo.js';
+import { createOrdersRouter } from './routes/orders.js';
 import { createProductsRouter } from './routes/products.js';
 
 const createApp = () => {
@@ -18,6 +20,8 @@ const createApp = () => {
   app.use('/api/admin', createAdminRouter());
   app.use('/api/products', createProductsRouter());
   app.use('/api/geo', createGeoRouter());
+  app.use('/api', createCheckoutRouter());
+  app.use('/api/orders', createOrdersRouter());
 
   app.use(errorHandler);
 

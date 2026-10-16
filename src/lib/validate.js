@@ -1,3 +1,4 @@
+import { MAX_ORDER_QUANTITY } from './catalog.js';
 import { HttpError } from './http.js';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -50,6 +51,33 @@ const parseNumericId = (value) => {
 
 const parseName = parseString('Name', 80);
 
+const MAX_PAGE = 10000;
+
+const parsePage = (value = 1) => {
+  const page = Number(value);
+  if (!Number.isInteger(page) || page < 1 || page > MAX_PAGE) throw new HttpError(400, `Page must be a whole number from 1 to ${MAX_PAGE}`);
+  return page;
+};
+
+const MAX_CART_LINES = 50;
+
+// Cart lines [{ slug, accessoryIds, quantity }]; prices and stock are checked later against the database.
+const parseCartItems = (value) => {
+  if (!Array.isArray(value) || !value.length || value.length > MAX_CART_LINES) {
+    throw new HttpError(400, `items must list 1 to ${MAX_CART_LINES} products`);
+  }
+  return value.map((item) => {
+    if (!Number.isInteger(item?.quantity) || item.quantity < 1 || item.quantity > MAX_ORDER_QUANTITY) {
+      throw new HttpError(400, `Quantity must be a whole number from 1 to ${MAX_ORDER_QUANTITY}`);
+    }
+    return {
+      slug: parseString('Product', 140)(item.slug),
+      accessoryIds: parseUuidList('Accessory')(item.accessoryIds ?? []),
+      quantity: item.quantity,
+    };
+  });
+};
+
 // Runs each parser in `specs` ({ field: parser }) over `body`. A partial parse skips absent fields.
 const parseFields = (body, specs, { partial = false } = {}) =>
   Object.fromEntries(
@@ -70,5 +98,7 @@ export {
   parseUuidList,
   parseNumericId,
   parseName,
+  parsePage,
+  parseCartItems,
   parseFields,
 };

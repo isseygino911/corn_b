@@ -5,7 +5,6 @@ const createProductsRouter = () => {
   const router = Router();
   router.get('/', controller.list);
   router.get('/:slug', controller.get);
-  router.post('/:slug/quote', controller.createQuote);
   return router;
 };
 

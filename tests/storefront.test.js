@@ -4,7 +4,6 @@ import { idOf, list, setupSuite } from './helpers.js';
 
 const ctx = setupSuite();
 const archive = (cookie, kind, e) => ctx.call('POST', `/api/admin/${kind}/${idOf(e)}/archive`, { cookie });
-const quote = (slug, accessoryIds) => ctx.call('POST', `/api/products/${slug}/quote`, { body: { accessoryIds } });
 
 async function seedImage(cookie, product) {
   const up = await ctx.call('POST', '/api/admin/uploads', { cookie, body: { contentType: 'image/png', size: 10 } });
@@ -81,66 +80,6 @@ describe('public products', () => {
     assert.equal((await ctx.call('GET', `/api/products/${off.slug}`)).status, 404);
     assert.equal((await ctx.call('GET', `/api/products/${gone.slug}`)).status, 404);
     assert.equal((await ctx.call('GET', '/api/products/no-such-slug')).status, 404);
-    assert.equal((await quote(off.slug, [])).status, 404);
-  });
-});
-
-describe('quote', () => {
-  async function fixture() {
-    const cookie = await ctx.adminCookie();
-    const a = await ctx.makeAccessory(cookie, { name: 'A', priceCents: 200 });
-    const b = await ctx.makeAccessory(cookie, { name: 'B', priceCents: 200 });
-    const c = await ctx.makeAccessory(cookie, { name: 'C', priceCents: 600 });
-    const p = await ctx.makeProduct(cookie, { priceCents: 1000, accessoryIds: [a.publicId, b.publicId, c.publicId] });
-    return { cookie, a, b, c, p };
-  }
-
-  test('no accessories: product price only', async () => {
-    const { p } = await fixture();
-    const res = await quote(p.slug, []);
-    assert.equal(res.status, 200);
-    assert.equal(res.body.productCents, 1000);
-    assert.deepEqual(res.body.accessories, []);
-    assert.equal(res.body.totalCents, 1000);
-  });
-
-  test('$10 + 2 + 2 + 6 = $20', async () => {
-    const { p, a, b, c } = await fixture();
-    const res = await quote(p.slug, [a.publicId, b.publicId, c.publicId]);
-    assert.equal(res.status, 200);
-    assert.equal(res.body.productCents, 1000);
-    assert.equal(res.body.accessories.length, 3);
-    assert.equal(res.body.totalCents, 2000);
-  });
-
-  test('any subset sums correctly; a client-sent total is ignored', async () => {
-    const { p, a, c } = await fixture();
-    const res = await ctx.call('POST', `/api/products/${p.slug}/quote`, {
-      body: { accessoryIds: [a.publicId, c.publicId], totalCents: 1, priceCents: 1 },
-    });
-    assert.equal(res.status, 200);
-    assert.equal(res.body.totalCents, 1800);
-  });
-
-  test('400 for sold out, inactive, archived, not-allowed, unknown, or malformed accessories', async () => {
-    const { cookie, p, a } = await fixture();
-    const soldOut = await ctx.makeAccessory(cookie, { name: 'S', stock: 0 });
-    const inactive = await ctx.makeAccessory(cookie, { name: 'I' });
-    const archived = await ctx.makeAccessory(cookie, { name: 'R' });
-    const stranger = await ctx.makeAccessory(cookie, { name: 'N' });
-    const linked = await ctx.makeProduct(cookie, {
-      name: 'Linked',
-      accessoryIds: [soldOut.publicId, inactive.publicId, archived.publicId],
-    });
-    await ctx.call('PATCH', `/api/admin/accessories/${idOf(inactive)}`, { cookie, body: { active: false } });
-    await archive(cookie, 'accessories', archived);
-
-    for (const id of [soldOut.publicId, inactive.publicId, archived.publicId]) {
-      assert.equal((await quote(linked.slug, [id])).status, 400, id);
-    }
-    assert.equal((await quote(p.slug, [stranger.publicId])).status, 400, 'not allowed for this product');
-    assert.equal((await quote(p.slug, ['00000000-0000-4000-8000-000000000000'])).status, 400, 'unknown');
-    assert.equal((await quote(p.slug, ['nope'])).status, 400, 'malformed');
   });
 
   test('a sold-out product can still be read, and its accessories flagged soldOut', async () => {

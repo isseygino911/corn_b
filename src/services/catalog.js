@@ -1,5 +1,6 @@
 import { randomBytes, randomUUID } from 'node:crypto';
 import { pool, withTransaction } from '../db.js';
+import { MAX_ORDER_QUANTITY } from '../lib/catalog.js';
 import { HttpError } from '../lib/http.js';
 import { nextSku } from '../lib/sku.js';
 import { signedReadUrl } from './storage.js';
@@ -277,15 +278,10 @@ const getPublicProduct = async (slug) => {
     colorway: row.colorway,
     priceCents: row.price_cents,
     soldOut: row.stock === 0,
+    maxQuantity: Math.min(row.stock, MAX_ORDER_QUANTITY),
     images: images.map((image) => ({ url: signedReadUrl(image.s3_key), isMain: Boolean(image.is_main) })),
     accessories: await listProductAccessories(row.id),
   };
-};
-
-// Storefront product row plus its allowed accessories, for pricing.
-const getQuotable = async (slug) => {
-  const row = await findPublicProductRow(slug);
-  return { priceCents: row.price_cents, accessories: await listProductAccessories(row.id) };
 };
 
 export {
@@ -301,5 +297,4 @@ export {
   setArchived,
   listPublicProducts,
   getPublicProduct,
-  getQuotable,
 };

@@ -13,8 +13,8 @@ const pool = mysql.createPool({ ...connectionConfig, database, waitForConnection
 
 const closePool = () => pool.end();
 
-// Runs fn(connection) in a transaction, rolling back if it throws.
-const withTransaction = async (fn) => {
+// Runs fn(connection) in a transaction, rolling back if it throws. A deadlock victim is rolled back and retried once.
+const withTransaction = async (fn, { retried = false } = {}) => {
   const connection = await pool.getConnection();
   try {
     await connection.beginTransaction();
@@ -23,6 +23,7 @@ const withTransaction = async (fn) => {
     return result;
   } catch (err) {
     await connection.rollback();
+    if (err.code === 'ER_LOCK_DEADLOCK' && !retried) return withTransaction(fn, { retried: true });
     throw err;
   } finally {
     connection.release();

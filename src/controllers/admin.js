@@ -8,6 +8,7 @@ import {
   parseOneOf,
   parseNumericId,
   parseOptionalString,
+  parsePage,
   parseString,
   parseUuidList,
   text,
@@ -19,7 +20,6 @@ import { EXTENSIONS, KEY_PATTERN, MAX_UPLOAD_BYTES, UPLOAD_KINDS, createUploadUr
 const MAX_PRICE_CENTS = 100_000_000;
 const MAX_STOCK = 1_000_000;
 const MAX_IMAGES = 5;
-const MAX_PAGE = 10000;
 
 const parseSku = (value) => {
   if (value === undefined || value === '') return undefined;
@@ -140,11 +140,8 @@ const restoreAccessory = async (req, res) =>
 
 const getDashboard = async (req, res) => res.json(await adminUsers.dashboard());
 
-const listUsers = async (req, res) => {
-  const page = Number(req.query.page ?? 1);
-  if (!Number.isInteger(page) || page < 1 || page > MAX_PAGE) throw new HttpError(400, `Page must be a whole number from 1 to ${MAX_PAGE}`);
-  res.json(await adminUsers.listUsers({ q: text(req.query.q).trim(), page }));
-};
+const listUsers = async (req, res) =>
+  res.json(await adminUsers.listUsers({ q: text(req.query.q).trim(), page: parsePage(req.query.page) }));
 
 export {
   getDashboard,

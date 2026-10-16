@@ -1,5 +1,7 @@
 import { Router } from 'express';
 import * as controller from '../controllers/admin.js';
+import * as orders from '../controllers/orders.js';
+import * as settings from '../controllers/settings.js';
 import { requireAdmin } from '../middleware/requireAdmin.js';
 
 const createAdminRouter = () => {
@@ -24,6 +26,17 @@ const createAdminRouter = () => {
   router.patch('/accessories/:id', controller.updateAccessory);
   router.post('/accessories/:id/archive', controller.archiveAccessory);
   router.post('/accessories/:id/restore', controller.restoreAccessory);
+
+  router.get('/settings', settings.getSettings);
+  router.patch('/settings', settings.updateSettings);
+  router.get('/shipping-rates', settings.listRates);
+  router.post('/shipping-rates', settings.createRate);
+  router.patch('/shipping-rates/:id', settings.updateRate);
+  router.delete('/shipping-rates/:id', settings.deleteRate);
+
+  router.get('/orders', orders.adminList);
+  router.get('/orders/:id', orders.adminGet);
+  router.patch('/orders/:id/status', orders.adminSetStatus);
 
   return router;
 };

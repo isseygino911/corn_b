@@ -1,4 +1,5 @@
 import nodemailer from 'nodemailer';
+import { orderConfirmationEmail } from '../lib/orderEmail.js';
 
 // Mail sent under NODE_ENV=test is recorded here instead of going out.
 const outbox = [];
@@ -38,4 +39,6 @@ const sendPasswordResetEmail = (to, token) =>
     text: `Choose a new password:\n\n${process.env.APP_URL}/reset-password?token=${token}\n\nThe link expires in 1 hour. If you did not ask for this, ignore this email.`,
   });
 
-export { outbox, sendVerificationEmail, sendPasswordResetEmail };
+const sendOrderConfirmationEmail = (order) => send({ to: order.email, ...orderConfirmationEmail(order) });
+
+export { outbox, sendVerificationEmail, sendPasswordResetEmail, sendOrderConfirmationEmail };
