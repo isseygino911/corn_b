@@ -1,4 +1,5 @@
 import express from 'express';
+import { cors } from './middleware/cors.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import { createAccountRouter } from './routes/account.js';
 import { createAdminRouter } from './routes/admin.js';
@@ -12,6 +13,7 @@ const createApp = () => {
   const app = express();
 
   if (process.env.NODE_ENV === 'production') app.set('trust proxy', 1);
+  app.use(cors);
   app.use(express.json());
 
   app.get('/api/health', (req, res) => res.json({ ok: true }));

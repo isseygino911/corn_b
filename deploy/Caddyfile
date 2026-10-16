@@ -1,11 +1,10 @@
-# Example only. Replace example.com with the real domain.
-example.com {
-	handle /api/* {
-		reverse_proxy localhost:3001
-	}
-	handle {
-		root * /var/www/corn/dist
-		try_files {path} /index.html
-		file_server
-	}
+# Example only. Frontend and API live on separate hosts; the API allows the frontend through CORS (APP_URL).
+corn.iidesign.cloud {
+	root * /var/www/corn/dist
+	try_files {path} /index.html
+	file_server
+}
+
+corn-api.iidesign.cloud {
+	reverse_proxy localhost:3001
 }
