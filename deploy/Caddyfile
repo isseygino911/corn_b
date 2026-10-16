@@ -1,0 +1,11 @@
+# Example only. Replace example.com with the real domain.
+example.com {
+	handle /api/* {
+		reverse_proxy localhost:3001
+	}
+	handle {
+		root * /var/www/corn/dist
+		try_files {path} /index.html
+		file_server
+	}
+}
