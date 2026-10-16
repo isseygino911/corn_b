@@ -3,11 +3,13 @@ CREATE TABLE settings (
   setting_value VARCHAR(255) NOT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
--- country_code NULL is the default row; country_key makes "one default row" a unique constraint too.
+-- country_code NULL is the default row. country_key ('--' for that row, else the country code) is set by the
+-- service so UNIQUE also allows only one default row (NULLs never collide). A plain column, not a generated
+-- one, because MariaDB refuses generated columns here.
 CREATE TABLE shipping_rates (
   id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   country_code CHAR(2) NULL,
-  country_key CHAR(2) GENERATED ALWAYS AS (COALESCE(country_code, '--')) STORED NOT NULL UNIQUE,
+  country_key CHAR(2) NOT NULL DEFAULT '--' UNIQUE,
   price_cents INT UNSIGNED NOT NULL,
   active BOOL NOT NULL DEFAULT 1
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

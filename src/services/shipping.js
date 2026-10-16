@@ -10,6 +10,14 @@ const view = (row) => ({
 });
 
 const COLUMNS = { countryCode: 'country_code', priceCents: 'price_cents', active: 'active' };
+const NO_COUNTRY = '--'; // country_key of the default row
+
+// API fields -> table columns, keeping country_key (the unique key) in step with country_code.
+const toColumns = (fields) => {
+  const columns = Object.fromEntries(Object.entries(fields).map(([key, value]) => [COLUMNS[key], value]));
+  if ('countryCode' in fields) columns.country_key = fields.countryCode ?? NO_COUNTRY;
+  return columns;
+};
 
 const findRow = async (id) => {
   const [rows] = await pool.query('SELECT * FROM shipping_rates WHERE id = ?', [id]);
@@ -28,23 +36,14 @@ const list = async () => {
 };
 
 const create = async (fields) => {
-  const keys = Object.keys(fields);
-  const [{ insertId }] = await pool
-    .query('INSERT INTO shipping_rates (??) VALUES (?)', [keys.map((key) => COLUMNS[key]), keys.map((key) => fields[key])])
-    .catch(rethrowDuplicate);
+  const [{ insertId }] = await pool.query('INSERT INTO shipping_rates SET ?', [toColumns(fields)]).catch(rethrowDuplicate);
   return view(await findRow(insertId));
 };
 
 const update = async (id, fields) => {
   const row = await findRow(id);
-  const keys = Object.keys(fields);
-  if (keys.length) {
-    await pool
-      .query(`UPDATE shipping_rates SET ${keys.map((key) => `${COLUMNS[key]} = ?`).join(', ')} WHERE id = ?`, [
-        ...keys.map((key) => fields[key]),
-        row.id,
-      ])
-      .catch(rethrowDuplicate);
+  if (Object.keys(fields).length) {
+    await pool.query('UPDATE shipping_rates SET ? WHERE id = ?', [toColumns(fields), row.id]).catch(rethrowDuplicate);
   }
   return view(await findRow(id));
 };
