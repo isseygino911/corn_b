@@ -1,12 +1,12 @@
 import { HttpError } from '../lib/http.js';
 import { SESSION_COOKIE, SESSION_MAX_AGE_SECONDS, clearCookie, readCookie, setCookie } from '../lib/session.js';
+import { parseName, text } from '../lib/validate.js';
 import * as auth from '../services/auth.js';
 import { createGoogleAuthRequest, fetchGoogleProfile, statesMatch } from '../services/google.js';
 
 const GOOGLE_COOKIE = 'g_oauth';
 const GOOGLE_COOKIE_MAX_AGE_SECONDS = 10 * 60;
 
-const text = (value) => (typeof value === 'string' ? value : '');
 const normalizeEmail = (value) => text(value).trim().toLowerCase();
 
 const parseEmail = (value) => {
@@ -23,12 +23,6 @@ const parsePassword = (value) => {
     throw new HttpError(400, 'Password must be 8 to 128 characters');
   }
   return password;
-};
-
-const parseName = (value) => {
-  const name = text(value).trim();
-  if (!name || name.length > 80) throw new HttpError(400, 'Name must be 1 to 80 characters');
-  return name;
 };
 
 const parseToken = (value) => {

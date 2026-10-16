@@ -1,8 +1,19 @@
+import assert from 'node:assert/strict';
 import { createHash, randomBytes } from 'node:crypto';
 import { once } from 'node:events';
 import { afterEach, after, beforeEach } from 'node:test';
 
 const realFetch = globalThis.fetch;
+const TABLES = [
+  'product_accessories',
+  'product_images',
+  'addresses',
+  'accessories',
+  'products',
+  'sessions',
+  'auth_tokens',
+  'users',
+];
 const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
 
 export const PASSWORD = 'correct-horse-battery';
@@ -94,8 +105,10 @@ export function setupSuite() {
     ctx.pool = pool;
     ctx.outbox = outbox;
     outbox.length = 0;
+    const [[{ name }]] = await pool.query('SELECT DATABASE() AS name');
+    if (!name?.endsWith('_test')) throw new Error(`Refusing to truncate "${name}": not a *_test database. Run tests with npm test.`);
     await pool.query('SET FOREIGN_KEY_CHECKS = 0');
-    for (const table of ['sessions', 'auth_tokens', 'users']) await pool.query(`TRUNCATE TABLE ${table}`);
+    for (const table of TABLES) await pool.query(`TRUNCATE TABLE ${table}`);
     await pool.query('SET FOREIGN_KEY_CHECKS = 1');
     const { server, base } = await listen(createApp());
     ctx.server = server;
@@ -155,5 +168,42 @@ export function setupSuite() {
     return ctx.lastToken(email);
   };
 
+  // Cookie of a verified user; admin when `admin` is true.
+  ctx.cookieFor = async (email, { admin = false, name } = {}) => {
+    await ctx.createUser(email, { name });
+    if (admin) await ctx.pool.query('UPDATE users SET is_admin = 1 WHERE email = ?', [email]);
+    return ctx.signIn(email);
+  };
+  ctx.adminCookie = () => ctx.cookieFor('admin@example.com', { admin: true, name: 'Site Admin' });
+
+  // Catalog helpers go through the admin API and return the created entity.
+  ctx.makeProduct = async (cookie, overrides = {}) => {
+    const res = await ctx.call('POST', '/api/admin/products', { cookie, body: { ...PRODUCT, ...overrides } });
+    assert.equal(res.status, 201, JSON.stringify(res.body));
+    return entity(res.body, 'product');
+  };
+  ctx.makeAccessory = async (cookie, overrides = {}) => {
+    const res = await ctx.call('POST', '/api/admin/accessories', { cookie, body: { ...ACCESSORY, ...overrides } });
+    assert.equal(res.status, 201, JSON.stringify(res.body));
+    return entity(res.body, 'accessory');
+  };
+
   return ctx;
 }
+
+export const PRODUCT = {
+  name: 'Glass Gem Charm',
+  description: 'A bead charm.',
+  collection: 'charms',
+  colorway: 'pastel',
+  priceCents: 1000,
+  stock: 5,
+  active: true,
+};
+export const ACCESSORY = { name: 'Gold hook', priceCents: 200, stock: 5, active: true };
+
+// Single entities and lists are always wrapped: `{ product }`, `{ products }`.
+export const entity = (body, key) => body[key];
+export const list = (body, key) => body[key];
+// Admin and address routes address rows by the numeric `id`.
+export const idOf = (e) => e.id;

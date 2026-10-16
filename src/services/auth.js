@@ -58,6 +58,11 @@ const createSession = async (userId) => {
   return token;
 };
 
+const updateName = async (userId, name) => {
+  await pool.query('UPDATE users SET name = ? WHERE id = ?', [name, userId]);
+  return publicUser(await findUserById(userId));
+};
+
 const deleteSession = (token) => pool.query('DELETE FROM sessions WHERE token_hash = ?', [hashToken(token)]);
 
 // Returns the public user for a live session token, or undefined.
@@ -172,6 +177,7 @@ export {
   verifyEmail,
   resendVerification,
   login,
+  updateName,
   deleteSession,
   forgotPassword,
   resetPassword,
