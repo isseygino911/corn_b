@@ -1,6 +1,6 @@
 import { randomBytes, randomUUID } from 'node:crypto';
 import { pool, withTransaction } from '../db.js';
-import { MAX_ORDER_QUANTITY } from '../lib/catalog.js';
+import { BUYABLE_PRODUCT, MAX_ORDER_QUANTITY, RESERVED_SLUGS, SOLD_PRODUCT } from '../lib/catalog.js';
 import { HttpError } from '../lib/http.js';
 import { nextSku } from '../lib/sku.js';
 import { signedReadUrl } from './storage.js';
@@ -53,6 +53,7 @@ const productView = (row, images, accessoryIds) => ({
   priceCents: row.price_cents,
   stock: row.stock,
   active: Boolean(row.active),
+  sold: Boolean(row.sold),
   archivedAt: row.archived_at,
   images: images
     .map((image) => ({ key: image.s3_key, url: signedReadUrl(image.s3_key), isMain: Boolean(image.is_main) }))
@@ -130,7 +131,8 @@ const setColumns = (fields) => ({
 
 const createProduct = async ({ accessoryIds = [], ...fields }) => {
   const publicId = randomUUID();
-  const baseSlug = slugify(fields.name) || publicId.slice(0, 8);
+  const named = slugify(fields.name);
+  const baseSlug = named && !RESERVED_SLUGS.includes(named) ? named : [named, publicId.slice(0, 8)].filter(Boolean).join('-');
   const generated = [fields.sku ? null : 'sku', fields.slug ? null : 'slug'];
   const id = await retryGenerated(generated, (attempt) =>
     withTransaction(async (connection) => {
@@ -224,10 +226,12 @@ const setArchived = async (table, id, archived) => {
   return table === 'products' ? getProduct(id) : getAccessory(id);
 };
 
+const MAIN_KEY = '(SELECT s3_key FROM product_images WHERE product_id = products.id AND is_main LIMIT 1) AS main_key';
+
 const listPublicProducts = async ({ collection }) => {
   const [rows] = await pool.query(
-    `SELECT products.*, (SELECT s3_key FROM product_images WHERE product_id = products.id AND is_main LIMIT 1) AS main_key
-     FROM products WHERE active = 1 AND archived_at IS NULL ${collection ? 'AND collection = ?' : ''} ORDER BY id DESC`,
+    `SELECT products.*, ${MAIN_KEY}
+     FROM products WHERE ${BUYABLE_PRODUCT} ${collection ? 'AND collection = ?' : ''} ORDER BY id DESC`,
     collection ? [collection] : [],
   );
   return rows.map((row) => ({
@@ -239,6 +243,21 @@ const listPublicProducts = async ({ collection }) => {
     colorway: row.colorway,
     priceCents: row.price_cents,
     soldOut: row.stock === 0,
+    mainImageUrl: urlOf(row.main_key),
+  }));
+};
+
+// Gallery of sold pieces (live, not archived). The client orders them; this returns newest first.
+const listSoldProducts = async () => {
+  const [rows] = await pool.query(
+    `SELECT products.*, ${MAIN_KEY} FROM products WHERE ${SOLD_PRODUCT} ORDER BY id DESC`,
+  );
+  return rows.map((row) => ({
+    publicId: row.public_id,
+    name: row.name,
+    description: row.description,
+    collection: row.collection,
+    colorway: row.colorway,
     mainImageUrl: urlOf(row.main_key),
   }));
 };
@@ -260,7 +279,7 @@ const listProductAccessories = async (productId) => {
 };
 
 const findPublicProductRow = async (slug) => {
-  const [rows] = await pool.query('SELECT * FROM products WHERE slug = ? AND active = 1 AND archived_at IS NULL', [slug]);
+  const [rows] = await pool.query(`SELECT * FROM products WHERE slug = ? AND ${BUYABLE_PRODUCT}`, [slug]);
   if (!rows[0]) throw notFound('Product');
   return rows[0];
 };
@@ -296,5 +315,6 @@ export {
   getAccessory,
   setArchived,
   listPublicProducts,
+  listSoldProducts,
   getPublicProduct,
 };

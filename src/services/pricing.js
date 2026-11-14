@@ -1,4 +1,5 @@
 import { pool } from '../db.js';
+import { BUYABLE_PRODUCT } from '../lib/catalog.js';
 import { HttpError } from '../lib/http.js';
 import { getSettings } from './settings.js';
 import { shippingCents } from './shipping.js';
@@ -8,7 +9,7 @@ const lockClause = (lock, of = '') => (lock ? ` FOR UPDATE${of}` : '');
 
 const loadProducts = async (connection, slugs, lock) => {
   const [rows] = await connection.query(
-    `SELECT * FROM products WHERE slug IN (?) AND active = 1 AND archived_at IS NULL ORDER BY id${lockClause(lock)}`,
+    `SELECT * FROM products WHERE slug IN (?) AND ${BUYABLE_PRODUCT} ORDER BY id${lockClause(lock)}`,
     [slugs],
   );
   if (slugs.some((slug) => !rows.some((row) => row.slug === slug))) throw new HttpError(404, 'Product not found');

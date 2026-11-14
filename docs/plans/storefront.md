@@ -7,6 +7,7 @@ Out of scope: payment (next slice), refunds, discounts, free-shipping threshold,
 - Same conventions as `auth.md` / `panels.md`. Work on `main` (no worktree). Never `git commit`/`push` unless asked. Never commit `.env`.
 - Landing page is isolated and untouched: no Tailwind, no shadcn, no `motion` there; its CSS and GSAP stay as they are.
   Verify pixel-identical at 390px and desktop after every step.
+  Exception (sold slice, `sold.md`): the home sold carousel is a lazy chunk that brings the UI kit CSS (`tw:`-prefixed, theme vars on `.ui`).
 - New dependencies, approved by the owner (`corn`): `tailwindcss`, `@tailwindcss/vite`, shadcn/ui deps (`clsx`, `tailwind-merge`,
   `class-variance-authority`, `lucide-react`, Radix packages as the components need them, `sonner`), `motion`. Pin exact versions,
   check current docs (Context7) first. Nothing else. No TanStack Table, no cart/state library.

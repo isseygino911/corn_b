@@ -11,6 +11,7 @@
     "dev": "node --env-file=.env --watch src/index.js",
     "migrate": "node --env-file=.env scripts/migrate.js",
     "make-admin": "node --env-file=.env scripts/make-admin.js",
+    "import-sold": "node --env-file=.env scripts/import-sold.js",
     "test": "NODE_ENV=test node --env-file=.env --test --test-concurrency=1 tests/*.test.js"
   },
   "dependencies": {

@@ -43,10 +43,12 @@ const signedReadUrl = (key, now = new Date()) => {
   return `https://${host}/${key}?${canonicalQuery}&X-Amz-Signature=${signature}`;
 };
 
+const newKey = (kind, contentType) => `${KEY_PREFIXES[kind]}/${randomUUID()}.${EXTENSIONS[contentType]}`;
+
 // Returns a presigned PUT url for a new image key. The server never sees the file bytes.
 // Under NODE_ENV=test nothing is signed and AWS is never contacted.
 const createUploadUrl = async ({ contentType, size, kind }) => {
-  const key = `${KEY_PREFIXES[kind]}/${randomUUID()}.${EXTENSIONS[contentType]}`;
+  const key = newKey(kind, contentType);
   const uploadUrl = IS_TEST
     ? `https://s3.test/${key}?signed=1`
     : await getSignedUrl(
@@ -57,4 +59,11 @@ const createUploadUrl = async ({ contentType, size, kind }) => {
   return { uploadUrl, key, publicUrl: signedReadUrl(key) };
 };
 
-export { EXTENSIONS, MAX_UPLOAD_BYTES, UPLOAD_KINDS, KEY_PATTERN, signedReadUrl, createUploadUrl };
+// Uploads bytes from the server itself (import scripts). Returns the new key.
+const putImage = async ({ body, contentType, kind }) => {
+  const key = newKey(kind, contentType);
+  if (!IS_TEST) await s3().send(new PutObjectCommand({ Bucket: process.env.S3_BUCKET, Key: key, ContentType: contentType, Body: body }));
+  return key;
+};
+
+export { EXTENSIONS, MAX_UPLOAD_BYTES, UPLOAD_KINDS, KEY_PATTERN, signedReadUrl, createUploadUrl, putImage };

@@ -7,6 +7,8 @@ const list = async (req, res) => {
   res.json({ products: await catalog.listPublicProducts({ collection }) });
 };
 
+const sold = async (req, res) => res.json({ products: await catalog.listSoldProducts() });
+
 const get = async (req, res) => res.json({ product: await catalog.getPublicProduct(req.params.slug) });
 
-export { list, get };
+export { list, sold, get };

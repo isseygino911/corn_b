@@ -39,10 +39,10 @@ const dashboard = async () => {
   const [[counts]] = await pool.query(
     `SELECT
        (SELECT COUNT(*) FROM users) AS users,
-       (SELECT COUNT(*) FROM products WHERE archived_at IS NULL AND active = 1) AS activeProducts,
+       (SELECT COUNT(*) FROM products WHERE archived_at IS NULL AND active = 1 AND sold = 0) AS activeProducts,
        (SELECT COUNT(*) FROM products WHERE archived_at IS NULL AND active = 0) AS inactiveProducts,
        (SELECT COUNT(*) FROM accessories WHERE archived_at IS NULL) AS accessories,
-       (SELECT COUNT(*) FROM products WHERE archived_at IS NULL AND stock = 0)
+       (SELECT COUNT(*) FROM products WHERE archived_at IS NULL AND sold = 0 AND stock = 0)
          + (SELECT COUNT(*) FROM accessories WHERE archived_at IS NULL AND stock = 0) AS soldOut`,
   );
   return {

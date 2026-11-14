@@ -1,5 +1,5 @@
 import { HttpError } from '../lib/http.js';
-import { COLLECTIONS } from '../lib/catalog.js';
+import { COLLECTIONS, RESERVED_SLUGS } from '../lib/catalog.js';
 import { SKU_PATTERN } from '../lib/sku.js';
 import {
   parseBoolean,
@@ -33,6 +33,7 @@ const parseSlug = (value) => {
   if (!/^[a-z0-9]+(-[a-z0-9]+)*$/.test(text(value)) || value.length > 140) {
     throw new HttpError(400, 'Slug must be lowercase letters, digits and dashes');
   }
+  if (RESERVED_SLUGS.includes(value)) throw new HttpError(400, `Slug "${value}" is reserved`);
   return value;
 };
 
@@ -51,6 +52,7 @@ const PRODUCT_FIELDS = {
   priceCents: parseInteger('Price', { max: MAX_PRICE_CENTS }),
   stock: parseInteger('Stock', { max: MAX_STOCK, fallback: 0 }),
   active: parseBoolean('Active', false),
+  sold: parseBoolean('Sold', false),
   sku: parseSku,
   slug: parseSlug,
 };
