@@ -39,6 +39,31 @@ describe('sold products', () => {
     assert.equal(items[0].description, 'A red apple.');
   });
 
+  test('sold gallery pages: 12 per page in a stable order per month, new order next month', async () => {
+    const cookie = await ctx.adminCookie();
+    for (let i = 0; i < 14; i += 1) await ctx.makeProduct(cookie, { name: `Piece ${i}`, sold: true });
+    const page = async (month, n) => (await ctx.call('GET', `/api/products/sold?month=${month}&page=${n}`)).body;
+    const first = await page('2026-11', 1);
+    const second = await page('2026-11', 2);
+    assert.equal(first.products.length, 12);
+    assert.equal(second.products.length, 2);
+    assert.deepEqual([first.page, first.pageSize, first.total], [1, 12, 14]);
+    const names = [...first.products, ...second.products].map((p) => p.name);
+    assert.equal(new Set(names).size, 14);
+    assert.deepEqual((await page('2026-11', 1)).products.map((p) => p.name), first.products.map((p) => p.name));
+    const december = [...(await page('2026-12', 1)).products, ...(await page('2026-12', 2)).products].map((p) => p.name);
+    assert.notDeepEqual(december, names);
+    assert.deepEqual([...december].sort(), [...names].sort());
+    assert.deepEqual((await page('2026-11', 3)).products, []);
+  });
+
+  test('sold gallery rejects a bad month or page', async () => {
+    for (const query of ['month=2026-13', 'month=nov', 'page=0', 'page=x']) {
+      assert.equal((await ctx.call('GET', `/api/products/sold?${query}`)).status, 400, query);
+    }
+    assert.equal((await ctx.call('GET', '/api/products/sold')).status, 200);
+  });
+
   test('sold products are not listed, not viewable and cannot be quoted or ordered', async () => {
     const cookie = await ctx.adminCookie();
     const sold = await ctx.makeProduct(cookie, { name: 'Gone Piece', sold: true, stock: 5 });

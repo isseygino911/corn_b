@@ -2,6 +2,7 @@ import { randomBytes, randomUUID } from 'node:crypto';
 import { pool, withTransaction } from '../db.js';
 import { BUYABLE_PRODUCT, MAX_ORDER_QUANTITY, RESERVED_SLUGS, SOLD_PRODUCT } from '../lib/catalog.js';
 import { HttpError } from '../lib/http.js';
+import { monthlyOrder } from '../lib/monthlyOrder.js';
 import { nextSku } from '../lib/sku.js';
 import { signedReadUrl } from './storage.js';
 
@@ -247,12 +248,17 @@ const listPublicProducts = async ({ collection }) => {
   }));
 };
 
-// Gallery of sold pieces (live, not archived). The client orders them; this returns newest first.
-const listSoldProducts = async () => {
-  const [rows] = await pool.query(
-    `SELECT products.*, ${MAIN_KEY} FROM products WHERE ${SOLD_PRODUCT} ORDER BY id DESC`,
-  );
-  return rows.map((row) => ({
+const SOLD_PAGE_SIZE = 12;
+
+// One page of the sold gallery, in the month's shuffled order. Only the page's rows are loaded and their image links signed.
+const listSoldProducts = async ({ month, page }) => {
+  const [all] = await pool.query(`SELECT id FROM products WHERE ${SOLD_PRODUCT} ORDER BY id`);
+  const ids = monthlyOrder(all.map((row) => row.id), month).slice((page - 1) * SOLD_PAGE_SIZE, page * SOLD_PAGE_SIZE);
+  const [rows] = ids.length
+    ? await pool.query(`SELECT products.*, ${MAIN_KEY} FROM products WHERE id IN (?)`, [ids])
+    : [[]];
+  const byId = new Map(rows.map((row) => [row.id, row]));
+  const products = ids.map((id) => byId.get(id)).map((row) => ({
     publicId: row.public_id,
     name: row.name,
     description: row.description,
@@ -260,6 +266,7 @@ const listSoldProducts = async () => {
     colorway: row.colorway,
     mainImageUrl: urlOf(row.main_key),
   }));
+  return { products, page, pageSize: SOLD_PAGE_SIZE, total: all.length };
 };
 
 // Active accessories a storefront product allows (sold out ones included, flagged).
