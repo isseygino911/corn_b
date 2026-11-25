@@ -27,36 +27,28 @@ describe('settings and shipping admin auth', () => {
 });
 
 describe('settings', () => {
-  test('public storefront settings default to 9.25% tax and shipping off, with no auth', async () => {
+  test('public storefront settings default to shipping off and carry no tax rate, with no auth', async () => {
     const res = await ctx.call('GET', '/api/settings/storefront');
     assert.equal(res.status, 200);
-    assert.deepEqual(res.body, { taxRateBps: 925, shippingEnabled: false });
+    assert.deepEqual(res.body, { shippingEnabled: false });
   });
 
-  test('admin reads defaults, patches either field, and the public endpoint follows', async () => {
+  test('admin reads defaults, toggles shipping, and the public endpoint follows', async () => {
     const cookie = await ctx.adminCookie();
     const read = await ctx.call('GET', '/api/admin/settings', { cookie });
     assert.equal(read.status, 200);
-    assert.deepEqual(read.body.settings, { taxRateBps: 925, shippingEnabled: false });
+    assert.deepEqual(read.body.settings, { shippingEnabled: false });
 
-    assert.deepEqual(await ctx.setSettings(cookie, { taxRateBps: 750 }), { taxRateBps: 750, shippingEnabled: false });
-    assert.deepEqual(await ctx.setSettings(cookie, { shippingEnabled: true }), { taxRateBps: 750, shippingEnabled: true });
-    assert.deepEqual((await ctx.call('GET', '/api/settings/storefront')).body, { taxRateBps: 750, shippingEnabled: true });
+    assert.deepEqual(await ctx.setSettings(cookie, { shippingEnabled: true }), { shippingEnabled: true });
+    assert.deepEqual((await ctx.call('GET', '/api/settings/storefront')).body, { shippingEnabled: true });
+    assert.deepEqual(await ctx.setSettings(cookie, { shippingEnabled: false }), { shippingEnabled: false });
   });
 
-  test('tax rate accepts the 0 and 5000 bounds', async () => {
+  test('400 for a non-boolean shippingEnabled, changing nothing', async () => {
     const cookie = await ctx.adminCookie();
-    assert.equal((await ctx.setSettings(cookie, { taxRateBps: 0 })).taxRateBps, 0);
-    assert.equal((await ctx.setSettings(cookie, { taxRateBps: 5000 })).taxRateBps, 5000);
-  });
-
-  test('400 for out-of-range, fractional, non-numeric or non-boolean values, changing nothing', async () => {
-    const cookie = await ctx.adminCookie();
-    const bad = [{ taxRateBps: -1 }, { taxRateBps: 5001 }, { taxRateBps: 9.5 }, { taxRateBps: '900' }, { taxRateBps: null }, { shippingEnabled: 'yes' }];
-    for (const body of bad) {
-      assert.equal((await ctx.call('PATCH', '/api/admin/settings', { cookie, body })).status, 400, JSON.stringify(body));
-    }
-    assert.deepEqual((await ctx.call('GET', '/api/settings/storefront')).body, { taxRateBps: 925, shippingEnabled: false });
+    const res = await ctx.call('PATCH', '/api/admin/settings', { cookie, body: { shippingEnabled: 'yes' } });
+    assert.equal(res.status, 400);
+    assert.deepEqual((await ctx.call('GET', '/api/settings/storefront')).body, { shippingEnabled: false });
   });
 });
 

@@ -4,14 +4,7 @@ import { line, setupStoreSuite, UNKNOWN_UUID } from './storefrontHelpers.js';
 
 const ctx = setupStoreSuite();
 
-async function fixture() {
-  const admin = await ctx.adminCookie();
-  const hook = await ctx.makeAccessory(admin, { name: 'Hook', priceCents: 200, stock: 10 });
-  const charm = await ctx.makeProduct(admin, { name: 'Charm', priceCents: 1000, stock: 5, accessoryIds: [hook.publicId] });
-  const buyer = await ctx.userWithAddress('ada@example.com');
-  return { admin, hook, charm, ...buyer };
-}
-
+const fixture = () => ctx.orderFixture();
 const myOrders = (cookie) => ctx.call('GET', '/api/orders', { cookie });
 const counts = async () => ({
   orders: (await ctx.row('SELECT COUNT(*) AS n FROM orders')).n,
@@ -25,23 +18,24 @@ describe('place order', () => {
     assert.equal((await ctx.call('GET', '/api/orders/GGF-000001')).status, 401);
   });
 
-  test('201 with a repriced order: snapshots, tax rate copied, number format, status placed', async () => {
+  test('201 with a repriced pending_payment order: snapshots, flat 9.75% tax on the subtotal, number format', async () => {
     const { admin, hook, charm, cookie, address } = await fixture();
-    await ctx.setSettings(admin, { taxRateBps: 800, shippingEnabled: true });
+    await ctx.setSettings(admin, { shippingEnabled: true });
     await ctx.addRate(admin, { countryCode: 'US', priceCents: 500 });
 
-    const res = await ctx.placeOrder(cookie, [line(charm, 2, [hook])], address, { totalCents: 1, subtotalCents: 1, taxCents: 0 });
+    const res = await ctx.placeOrder(cookie, [line(charm, 2, [hook])], address, { totalCents: 1, subtotalCents: 1, taxCents: 7 });
     assert.equal(res.status, 201, JSON.stringify(res.body));
+    assert.ok(res.body.checkoutUrl);
     const o = res.body.order;
     assert.match(o.orderNumber, /^GGF-\d{6}$/);
     assert.match(o.publicId, /^[0-9a-f-]{36}$/);
-    assert.equal(o.status, 'placed');
+    assert.equal(o.status, 'pending_payment');
     assert.equal(o.email, 'ada@example.com');
     assert.equal(o.subtotalCents, 2400); // (1000 + 200) x 2
     assert.equal(o.shippingCents, 500);
-    assert.equal(o.taxRateBps, 800);
-    assert.equal(o.taxCents, 192);
-    assert.equal(o.totalCents, 2400 + 500 + 192);
+    assert.equal(o.taxRateBps, 975);
+    assert.equal(o.taxCents, 234); // 2400 x 9.75%, shipping untaxed
+    assert.equal(o.totalCents, 2400 + 500 + 234);
     assert.ok(o.placedAt && o.statusUpdatedAt);
     assert.deepEqual(o.address, {
       fullName: 'Ada Lovelace',
@@ -93,7 +87,7 @@ describe('place order', () => {
 
   test('buying exactly the remaining stock succeeds, then the next order is 409', async () => {
     const { charm, cookie, address } = await fixture();
-    assert.equal((await ctx.placeOrder(cookie, [line(charm, 5)], address)).status, 201);
+    await ctx.placePaid(cookie, [line(charm, 5)], address);
     assert.equal(await ctx.stockOf('products', charm), 0);
     assert.equal((await ctx.placeOrder(cookie, [line(charm, 1)], address)).status, 409);
   });
@@ -192,7 +186,7 @@ describe('place order', () => {
 
   test('order numbers are unique and increase', async () => {
     const { charm, cookie, address } = await fixture();
-    const a = (await ctx.placeOrder(cookie, [line(charm)], address)).body.order.orderNumber;
+    const a = (await ctx.placePaid(cookie, [line(charm)], address)).orderNumber;
     const b = (await ctx.placeOrder(cookie, [line(charm)], address)).body.order.orderNumber;
     assert.notEqual(a, b);
     assert.ok(b > a);
@@ -200,10 +194,16 @@ describe('place order', () => {
 });
 
 describe('order confirmation email', () => {
-  test('is sent to the customer after commit with order number, items, totals and link', async () => {
+  test('nothing is sent when the order is placed', async () => {
     const { hook, charm, cookie, address } = await fixture();
-    ctx.outbox.length = 0;
+    assert.equal((await ctx.placeOrder(cookie, [line(charm, 1, [hook])], address)).status, 201);
+    assert.equal(ctx.outbox.length, 0);
+  });
+
+  test('is sent to the customer once paid with order number, items, totals, tax and link', async () => {
+    const { hook, charm, cookie, address } = await fixture();
     const { order } = (await ctx.placeOrder(cookie, [line(charm, 1, [hook])], address)).body;
+    await ctx.payOrder(order);
 
     assert.equal(ctx.outbox.length, 1);
     const [mail] = ctx.outbox;
@@ -211,32 +211,32 @@ describe('order confirmation email', () => {
     assert.match(mail.subject, new RegExp(order.orderNumber));
     for (const part of [mail.text, mail.html]) {
       assert.ok(part, 'has both text and html');
-      for (const expected of [order.orderNumber, 'Charm', 'Hook', '1 Main St', `/orders/${order.orderNumber}`]) {
+      for (const expected of [order.orderNumber, 'Charm', 'Hook', '1 Main St', `/orders/${order.orderNumber}`, 'Tax (9.75%)']) {
         assert.ok(part.includes(expected), `missing ${expected}`);
       }
+      assert.doesNotMatch(part, /payment instructions/i);
     }
     assert.ok(mail.text.includes(`${process.env.APP_URL}/orders/${order.orderNumber}`));
     assert.ok(mail.text.includes('12.00'), 'subtotal shown');
-    assert.match(mail.text, /payment/i);
   });
 
   test('no email is sent when the order is rejected', async () => {
     const { charm, cookie, address } = await fixture();
-    ctx.outbox.length = 0;
     assert.equal((await ctx.placeOrder(cookie, [line(charm, 6)], address)).status, 409);
     assert.equal(ctx.outbox.length, 0);
   });
 
-  test('a send failure does not fail the order', async () => {
+  test('a send failure does not fail the payment', async () => {
     const { charm, cookie, address } = await fixture();
+    const { order } = (await ctx.placeOrder(cookie, [line(charm)], address)).body;
     ctx.outbox.push = () => {
       throw new Error('smtp down');
     };
     try {
-      const res = await ctx.placeOrder(cookie, [line(charm)], address);
-      assert.equal(res.status, 201, JSON.stringify(res.body));
+      await ctx.payOrder(order);
+      const res = await ctx.call('GET', `/api/orders/${order.orderNumber}`, { cookie });
+      assert.equal(res.body.order.status, 'placed');
       assert.equal(await ctx.stockOf('products', charm), 4);
-      assert.equal((await counts()).orders, 1);
     } finally {
       delete ctx.outbox.push;
     }
@@ -247,8 +247,8 @@ describe('own orders', () => {
   test('list is newest first and only the caller\'s', async () => {
     const { charm, cookie, address } = await fixture();
     const other = await ctx.userWithAddress('eve@example.com');
-    const first = (await ctx.placeOrder(cookie, [line(charm)], address)).body.order;
-    const second = (await ctx.placeOrder(cookie, [line(charm, 2)], address)).body.order;
+    const first = await ctx.placePaid(cookie, [line(charm)], address);
+    const second = await ctx.placePaid(cookie, [line(charm, 2)], address);
     await ctx.placeOrder(other.cookie, [line(charm)], other.address);
 
     const res = await myOrders(cookie);

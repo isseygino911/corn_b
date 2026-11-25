@@ -14,10 +14,9 @@ const totalRows = (order) => [
   ['Total', money(order.totalCents)],
 ];
 
-// Branded confirmation for a placed order, as { subject, text, html }.
+// Branded confirmation for a paid order, as { subject, text, html }.
 const orderConfirmationEmail = (order) => {
   const link = `${process.env.APP_URL}/orders/${order.orderNumber}`;
-  const note = 'Payment instructions will follow in a separate email.';
 
   const text = [
     `Thank you for your order, ${order.address.fullName}!`,
@@ -33,7 +32,6 @@ const orderConfirmationEmail = (order) => {
     'Shipping to:',
     ...addressLines(order.address),
     '',
-    note,
     `View your order: ${link}`,
   ].join('\n');
 
@@ -57,7 +55,6 @@ const orderConfirmationEmail = (order) => {
 <table style="margin:16px 0 24px auto;border-collapse:collapse">${totals}</table>
 <p style="margin:0 0 4px;font-weight:bold">Shipping to</p>
 <p style="margin:0 0 24px;color:#7a6f64">${addressLines(order.address).map(escapeHtml).join('<br>')}</p>
-<p style="margin:0 0 24px">${note}</p>
 <a href="${escapeHtml(link)}" style="display:inline-block;padding:12px 24px;border-radius:999px;background:#2b2622;color:#fffdf9;text-decoration:none">View your order</a>
 </div></div>`;
 

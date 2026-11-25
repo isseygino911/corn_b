@@ -3,11 +3,9 @@ import * as settings from '../services/settings.js';
 import * as shipping from '../services/shipping.js';
 import { parseCountryCode } from './checkout.js';
 
-const MAX_TAX_BPS = 5000;
 const MAX_SHIPPING_CENTS = 100_000_000;
 
 const SETTINGS_FIELDS = {
-  taxRateBps: parseInteger('Tax rate', { max: MAX_TAX_BPS }),
   shippingEnabled: parseBoolean('Shipping enabled'),
 };
 

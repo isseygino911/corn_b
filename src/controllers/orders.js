@@ -8,7 +8,8 @@ const ownView = ({ id, userId, ...order }) => order;
 const place = async (req, res) => {
   const addressId = req.body?.addressId;
   if (!Number.isInteger(addressId) || addressId < 1) throw new HttpError(400, 'addressId is required');
-  res.status(201).json({ order: ownView(await orders.place(req.user, { items: parseCartItems(req.body?.items), addressId })) });
+  const { order, checkoutUrl } = await orders.place(req.user, { items: parseCartItems(req.body?.items), addressId });
+  res.status(201).json({ order: ownView(order), checkoutUrl });
 };
 
 const list = async (req, res) => res.json({ orders: (await orders.listForUser(req.user.id)).map(ownView) });

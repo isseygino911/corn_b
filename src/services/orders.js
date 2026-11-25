@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { pool, withTransaction } from '../db.js';
 import { HttpError } from '../lib/http.js';
 import { sendOrderConfirmationEmail } from './mailer.js';
+import { createCheckout, expireCheckout } from './payments.js';
 import * as addresses from './addresses.js';
 import { priceCart } from './pricing.js';
 import { applyStock, tally } from './stock.js';
@@ -9,9 +10,9 @@ import { signedReadUrl } from './storage.js';
 
 const PAGE_SIZE = 25;
 const MY_ORDERS_LIMIT = 100;
-const STATUSES = ['placed', 'shipped', 'delivered', 'cancelled'];
-// A cancelled or delivered order is final.
-const TRANSITIONS = { placed: ['shipped', 'cancelled'], shipped: ['delivered', 'cancelled'], delivered: [], cancelled: [] };
+const STATUSES = ['pending_payment', 'placed', 'shipped', 'delivered', 'cancelled'];
+// placed means paid. A pending order only moves by webhook (paid) or is discarded; cancelled and delivered are final.
+const TRANSITIONS = { pending_payment: [], placed: ['shipped', 'cancelled'], shipped: ['delivered', 'cancelled'], delivered: [], cancelled: [] };
 
 const orderNumber = (id) => `GGF-${String(id).padStart(6, '0')}`;
 
@@ -94,11 +95,54 @@ const insertItems = async (connection, orderId, lines) => {
   }
 };
 
-// Reprices from the database under row locks, takes the stock and snapshots everything, all in one transaction.
-// The confirmation email goes out after commit; a send failure is logged and never fails the order.
+// Puts the order's products and accessories back into stock (cancelling, or discarding an unpaid order).
+const restock = async (connection, orderId) => {
+  const [items] = await connection.query('SELECT id, product_id, quantity FROM order_items WHERE order_id = ?', [orderId]);
+  const [extras] = items.length
+    ? await connection.query('SELECT order_item_id, accessory_id FROM order_item_accessories WHERE order_item_id IN (?)', [
+        items.map((item) => item.id),
+      ])
+    : [[]];
+  const lines = items.map((item) => ({
+    product: { id: item.product_id },
+    accessories: extras.filter((extra) => extra.order_item_id === item.id).map((extra) => ({ id: extra.accessory_id })),
+    quantity: item.quantity,
+  }));
+  const demand = tally(lines);
+  demand.products.delete(null);
+  demand.accessories.delete(null);
+  await applyStock(connection, demand, 1);
+};
+
+// Deletes an order that was never paid and releases its stock. A no-op once it is paid or gone.
+const discard = (id) =>
+  withTransaction(async (connection) => {
+    const [[order]] = await connection.query('SELECT status FROM orders WHERE id = ? FOR UPDATE', [id]);
+    if (order?.status !== 'pending_payment') return;
+    await restock(connection, id);
+    await connection.query('DELETE FROM orders WHERE id = ?', [id]);
+  });
+
+// A new checkout replaces the user's unfinished ones so their held stock comes back at once.
+// A session Stripe refuses to expire (already completed) is left for its webhook.
+const discardPending = async (userId) => {
+  const [rows] = await pool.query("SELECT id, stripe_session_id FROM orders WHERE user_id = ? AND status = 'pending_payment'", [userId]);
+  for (const row of rows) {
+    try {
+      if (row.stripe_session_id) await expireCheckout(row.stripe_session_id);
+    } catch {
+      continue;
+    }
+    await discard(row.id);
+  }
+};
+
+// Reprices from the database under row locks, holds the stock and snapshots everything in one transaction as a
+// pending_payment order, then opens a Stripe Checkout Session for it.
 const place = async (user, { items, addressId }) => {
   const address = await addresses.get(user.id, addressId);
-  const orderId = await withTransaction(async (connection) => {
+  await discardPending(user.id);
+  const { orderId, priced } = await withTransaction(async (connection) => {
     const priced = await priceCart(items, { countryCode: address.countryCode, connection, lock: true });
     const [{ insertId }] = await connection.query(
       `INSERT INTO orders (public_id, user_id, email, full_name, phone, line1, line2, country_code, state_code, city, postal_code,
@@ -112,11 +156,37 @@ const place = async (user, { items, addressId }) => {
     await connection.query('UPDATE orders SET order_number = ? WHERE id = ?', [orderNumber(insertId), insertId]);
     await insertItems(connection, insertId, priced.lines);
     await applyStock(connection, tally(priced.lines), -1);
-    return insertId;
+    return { orderId: insertId, priced };
   });
   const order = await findOne('id = ?', [orderId]);
+  let session;
+  try {
+    session = await createCheckout({ user, address, order, priced });
+  } catch (err) {
+    console.error(`Order ${order.orderNumber}: could not create a Stripe Checkout Session`, err);
+    await discard(orderId);
+    throw new HttpError(502, 'Payment is unavailable right now. Please try again.');
+  }
+  await pool.query('UPDATE orders SET stripe_session_id = ? WHERE id = ?', [session.id, orderId]);
+  return { order, checkoutUrl: session.url };
+};
+
+// Webhook: the session was paid. Sends the confirmation once (redeliveries are no-ops).
+const markPaid = async (sessionId) => {
+  const [{ affectedRows }] = await pool.query(
+    `UPDATE orders SET status = 'placed', placed_at = NOW(), status_updated_at = NOW()
+     WHERE stripe_session_id = ? AND status = 'pending_payment'`,
+    [sessionId],
+  );
+  if (!affectedRows) return;
+  const order = await findOne('stripe_session_id = ?', [sessionId]);
   sendOrderConfirmationEmail(order).catch((err) => console.error(`Order ${order.orderNumber}: confirmation email failed`, err));
-  return order;
+};
+
+// Webhook: the session expired or its payment failed.
+const discardSession = async (sessionId) => {
+  const [[row]] = await pool.query('SELECT id FROM orders WHERE stripe_session_id = ?', [sessionId]);
+  if (row) await discard(row.id);
 };
 
 const listForUser = async (userId) => {
@@ -159,26 +229,10 @@ const setStatus = async (id, status) => {
     if (!TRANSITIONS[order.status].includes(status)) {
       throw new HttpError(409, `An order that is ${order.status} cannot become ${status}`, { code: 'invalid_transition' });
     }
-    if (status === 'cancelled') {
-      const [items] = await connection.query('SELECT id, product_id, quantity FROM order_items WHERE order_id = ?', [id]);
-      const [extras] = items.length
-        ? await connection.query('SELECT order_item_id, accessory_id FROM order_item_accessories WHERE order_item_id IN (?)', [
-            items.map((item) => item.id),
-          ])
-        : [[]];
-      const lines = items.map((item) => ({
-        product: { id: item.product_id },
-        accessories: extras.filter((extra) => extra.order_item_id === item.id).map((extra) => ({ id: extra.accessory_id })),
-        quantity: item.quantity,
-      }));
-      const demand = tally(lines);
-      demand.products.delete(null);
-      demand.accessories.delete(null);
-      await applyStock(connection, demand, 1);
-    }
+    if (status === 'cancelled') await restock(connection, id);
     await connection.query('UPDATE orders SET status = ?, status_updated_at = NOW() WHERE id = ?', [status, id]);
   });
   return get(id);
 };
 
-export { STATUSES, place, listForUser, getForUser, listAll, get, setStatus };
+export { STATUSES, place, markPaid, discardSession, listForUser, getForUser, listAll, get, setStatus };

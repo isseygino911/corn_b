@@ -29,12 +29,15 @@ const loadAccessories = async (connection, productIds, publicIds, lock) => {
   return rows;
 };
 
+// Flat sales tax: 9.75%, in basis points.
+const TAX_RATE_BPS = 975;
+
 // Subtotal, shipping, tax and total in integer cents. Tax is on the subtotal only, rounded to the nearest cent.
 const totals = async (subtotalCents, countryCode, connection) => {
-  const { taxRateBps, shippingEnabled } = await getSettings(connection);
+  const { shippingEnabled } = await getSettings(connection);
   const shipping = shippingEnabled ? await shippingCents(countryCode, connection) : 0;
-  const taxCents = Math.floor((subtotalCents * taxRateBps + 5000) / 10000);
-  return { subtotalCents, shippingCents: shipping, taxRateBps, taxCents, totalCents: subtotalCents + shipping + taxCents };
+  const taxCents = Math.floor((subtotalCents * TAX_RATE_BPS + 5000) / 10000);
+  return { subtotalCents, shippingCents: shipping, taxRateBps: TAX_RATE_BPS, taxCents, totalCents: subtotalCents + shipping + taxCents };
 };
 
 // The one place totals are computed. Reprices `items` ([{ slug, accessoryIds, quantity }]) from the database;

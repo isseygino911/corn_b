@@ -10,15 +10,10 @@ const ADMIN_ROUTES = [
   ['PATCH', '/api/admin/orders/1/status'],
 ];
 
-async function fixture() {
-  const admin = await ctx.adminCookie();
-  const hook = await ctx.makeAccessory(admin, { name: 'Hook', priceCents: 200, stock: 10 });
-  const charm = await ctx.makeProduct(admin, { name: 'Charm', priceCents: 1000, stock: 5, accessoryIds: [hook.publicId] });
-  const buyer = await ctx.userWithAddress('ada@example.com');
-  return { admin, hook, charm, ...buyer };
-}
+const fixture = () => ctx.orderFixture();
 
-const place = async (f, quantity = 2) => (await ctx.placeOrder(f.cookie, [line(f.charm, quantity, [f.hook])], f.address)).body.order;
+// A paid (status placed) order as the customer sees it.
+const place = (f, quantity = 2) => ctx.placePaid(f.cookie, [line(f.charm, quantity, [f.hook])], f.address);
 const setStatus = (admin, order, status) =>
   ctx.call('PATCH', `/api/admin/orders/${order.id}/status`, { cookie: admin, body: { status } });
 const listOrders = (admin, query = '') => ctx.call('GET', `/api/admin/orders${query}`, { cookie: admin });
@@ -44,7 +39,7 @@ describe('admin order list and detail', () => {
     const f = await fixture();
     const other = await ctx.userWithAddress('eve@example.com');
     const first = await place(f, 1);
-    const second = (await ctx.placeOrder(other.cookie, [line(f.charm)], other.address)).body.order;
+    const second = await ctx.placePaid(other.cookie, [line(f.charm)], other.address);
 
     const res = await listOrders(f.admin);
     assert.equal(res.status, 200);
@@ -63,7 +58,7 @@ describe('admin order list and detail', () => {
   test('pages of 25: page 2 holds the remainder', async () => {
     const f = await fixture();
     await ctx.pool.query('UPDATE products SET stock = 100');
-    for (let i = 0; i < 26; i += 1) await ctx.placeOrder(f.cookie, [line(f.charm)], f.address);
+    for (let i = 0; i < 26; i += 1) await ctx.placePaid(f.cookie, [line(f.charm)], f.address);
     const one = await listOrders(f.admin, '?page=1');
     const two = await listOrders(f.admin, '?page=2');
     assert.equal(one.body.orders.length, 25);
@@ -75,7 +70,7 @@ describe('admin order list and detail', () => {
     const f = await fixture();
     const other = await ctx.userWithAddress('eve@example.com');
     const a = await withId(f.admin, await place(f, 1));
-    const b = (await ctx.placeOrder(other.cookie, [line(f.charm)], other.address)).body.order;
+    const b = await ctx.placePaid(other.cookie, [line(f.charm)], other.address);
     await setStatus(f.admin, a, 'shipped');
 
     const shipped = await listOrders(f.admin, '?status=shipped');
@@ -89,6 +84,20 @@ describe('admin order list and detail', () => {
     const byNumber = await listOrders(f.admin, `?q=${a.orderNumber}`);
     assert.deepEqual(byNumber.body.orders.map((o) => o.orderNumber), [a.orderNumber]);
     assert.equal((await listOrders(f.admin, '?q=nobody-matches')).body.orders.length, 0);
+  });
+
+  test('?status=pending_payment lists only unpaid orders', async () => {
+    const f = await fixture();
+    const other = await ctx.userWithAddress('eve@example.com');
+    const paid = await ctx.placePaid(other.cookie, [line(f.charm)], other.address);
+    const pending = (await ctx.placeOrder(f.cookie, [line(f.charm)], f.address)).body.order;
+
+    const unpaid = await listOrders(f.admin, '?status=pending_payment');
+    assert.equal(unpaid.status, 200);
+    assert.deepEqual(unpaid.body.orders.map((o) => o.orderNumber), [pending.orderNumber]);
+    assert.equal(unpaid.body.orders[0].status, 'pending_payment');
+    const placed = await listOrders(f.admin, '?status=placed');
+    assert.deepEqual(placed.body.orders.map((o) => o.orderNumber), [paid.orderNumber]);
   });
 
   test('detail is the customer order plus the numeric id and userId; unknown or non-numeric id is 404', async () => {
@@ -166,6 +175,18 @@ describe('admin order status', () => {
     await setStatus(f.admin, order, 'delivered');
     assert.equal((await setStatus(f.admin, order, 'cancelled')).status, 409, 'delivered -> cancelled');
     assert.equal((await setStatus(f.admin, order, 'shipped')).status, 409, 'delivered -> shipped');
+    assert.equal(await ctx.stockOf('products', f.charm), 3);
+  });
+
+  test('a pending_payment order accepts no status change: 409, still pending, stock still reserved', async () => {
+    const f = await fixture();
+    const placed = (await ctx.placeOrder(f.cookie, [line(f.charm, 2, [f.hook])], f.address)).body.order;
+    const order = await withId(f.admin, placed);
+    for (const status of ['pending_payment', 'placed', 'shipped', 'delivered', 'cancelled']) {
+      assert.equal((await setStatus(f.admin, order, status)).status, 409, `pending_payment -> ${status}`);
+    }
+    const res = await ctx.call('GET', `/api/admin/orders/${order.id}`, { cookie: f.admin });
+    assert.equal(res.body.order.status, 'pending_payment');
     assert.equal(await ctx.stockOf('products', f.charm), 3);
   });
 

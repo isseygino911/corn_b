@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
-import { line, setupStoreSuite, UNKNOWN_UUID } from './storefrontHelpers.js';
+import { line, setupStoreSuite, taxOf, UNKNOWN_UUID } from './storefrontHelpers.js';
 
 const ctx = setupStoreSuite();
 
@@ -15,15 +15,24 @@ async function fixture() {
 }
 
 describe('checkout quote, shipping off', () => {
-  test('subtotal = (product + accessories) x qty; tax at the default 9.25%; shipping 0; total sums', async () => {
+  test('subtotal = (product + accessories) x qty; flat 9.75% tax; shipping 0; total sums', async () => {
     const { charm, hook, chain } = await fixture();
     const res = await quote([line(charm, 2, [hook, chain])]);
     assert.equal(res.status, 200, JSON.stringify(res.body));
-    // (1000 + 200 + 600) x 2 = 3600; 3600 x 925 / 10000 = 333
+    // (1000 + 200 + 600) x 2 = 3600; 3600 x 975 / 10000 = 351
     assert.equal(res.body.subtotalCents, 3600);
     assert.equal(res.body.shippingCents, 0);
-    assert.equal(res.body.taxCents, 333);
-    assert.equal(res.body.totalCents, 3933);
+    assert.equal(res.body.taxCents, 351);
+    assert.equal(res.body.totalCents, 3951);
+  });
+
+  test('tax rounds half up to the cent: 97.5 -> 98, 19.5 -> 20, 98.475 -> 98', async () => {
+    const { cookie, charm } = await fixture();
+    assert.equal((await quote([line(charm)])).body.taxCents, 98);
+    const half = await ctx.makeProduct(cookie, { name: 'Half', priceCents: 200 });
+    assert.equal((await quote([line(half)])).body.taxCents, 20);
+    const odd = await ctx.makeProduct(cookie, { name: 'Odd', priceCents: 1010 });
+    assert.equal((await quote([line(odd)])).body.taxCents, 98);
   });
 
   test('lines describe each item with its accessories and line total', async () => {
@@ -44,27 +53,7 @@ describe('checkout quote, shipping off', () => {
     const pearl = await ctx.makeProduct(cookie, { name: 'Pearl', priceCents: 2500 });
     const res = await quote([line(charm, 1, [hook]), line(pearl, 2)]);
     assert.equal(res.body.subtotalCents, 1200 + 5000);
-  });
-
-  test('tax rounds to the nearest cent: 92.5 rounds up, 93.425 rounds down', async () => {
-    const { cookie, charm } = await fixture();
-    assert.equal((await quote([line(charm)])).body.taxCents, 93);
-    const odd = await ctx.makeProduct(cookie, { name: 'Odd', priceCents: 1010 });
-    assert.equal((await quote([line(odd)])).body.taxCents, 93);
-    const high = await ctx.makeProduct(cookie, { name: 'High', priceCents: 1060 });
-    assert.equal((await quote([line(high)])).body.taxCents, 98); // 98.05
-  });
-
-  test('uses the admin-set tax rate; 0% gives no tax', async () => {
-    const { cookie, charm } = await fixture();
-    await ctx.setSettings(cookie, { taxRateBps: 800 });
-    const res = await quote([line(charm)]);
-    assert.equal(res.body.taxCents, 80);
-    assert.equal(res.body.totalCents, 1080);
-    await ctx.setSettings(cookie, { taxRateBps: 0 });
-    const free = await quote([line(charm)]);
-    assert.equal(free.body.taxCents, 0);
-    assert.equal(free.body.totalCents, 1000);
+    assert.equal(res.body.taxCents, taxOf(6200));
   });
 
   test('a countryCode and rates are ignored while shipping is off', async () => {
@@ -80,7 +69,8 @@ describe('checkout quote, shipping off', () => {
       body: { items: [{ ...line(charm), priceCents: 1, totalCents: 1 }], totalCents: 1, taxCents: 0, shippingCents: 0 },
     });
     assert.equal(res.body.subtotalCents, 1000);
-    assert.equal(res.body.totalCents, 1093);
+    assert.equal(res.body.taxCents, 98);
+    assert.equal(res.body.totalCents, 1098);
   });
 });
 
@@ -98,8 +88,8 @@ describe('checkout quote, shipping on', () => {
     const res = await quote([line(charm)], 'US');
     assert.equal(res.status, 200, JSON.stringify(res.body));
     assert.equal(res.body.shippingCents, 500);
-    assert.equal(res.body.taxCents, 93); // shipping not taxed
-    assert.equal(res.body.totalCents, 1000 + 500 + 93);
+    assert.equal(res.body.taxCents, 98); // tax on the subtotal only
+    assert.equal(res.body.totalCents, 1000 + 500 + 98);
   });
 
   test('another country falls back to the default row', async () => {
