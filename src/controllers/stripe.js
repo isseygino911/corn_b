@@ -7,7 +7,9 @@ const webhook = async (req, res) => {
   let event;
   try {
     event = verifyEvent(req.body, req.headers['stripe-signature']);
-  } catch {
+  } catch (error) {
+    // A wrong STRIPE_WEBHOOK_SECRET fails every delivery here, so make it visible in the logs.
+    console.error('Stripe webhook rejected:', error.message);
     throw new HttpError(400, 'Invalid Stripe signature');
   }
   const session = event.data.object;
